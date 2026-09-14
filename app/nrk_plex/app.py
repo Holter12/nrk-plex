@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse
@@ -9,7 +8,7 @@ from fastapi.responses import PlainTextResponse, RedirectResponse
 from nrk_plex.nrk.client import NrkApiError, NrkClient
 from nrk_plex.plex import DEFAULT_CHANNELS, build_m3u, build_xmltv, find_current_program
 
-app = FastAPI(title="NRK Plex", version="0.3.0")
+app = FastAPI(title="NRK Plex", version="0.3.1")
 client = NrkClient()
 
 
