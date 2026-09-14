@@ -36,7 +36,7 @@ class NrkClient:
         except ValueError as exc:
             raise NrkApiError(f"NRK API returned non-JSON for {path}") from exc
 
-    async def playback_metadata(self, program_id: str, manifest_type: str = "vod") -> Any:
+    async def playback_metadata(self, program_id: str, manifest_type: str = "program") -> Any:
         encoded_id = quote(program_id, safe="")
         encoded_type = quote(manifest_type, safe="")
         return await self._get_json(
@@ -44,7 +44,7 @@ class NrkClient:
             accept=settings.playback_accept,
         )
 
-    async def playback_manifest(self, program_id: str, manifest_type: str = "vod") -> Any:
+    async def playback_manifest(self, program_id: str, manifest_type: str = "program") -> Any:
         encoded_id = quote(program_id, safe="")
         encoded_type = quote(manifest_type, safe="")
         return await self._get_json(
