@@ -23,6 +23,7 @@ async def test_hdhr_discovery() -> None:
     assert data["FriendlyName"] == "NRK Plex"
     assert data["TunerCount"] == 3
     assert data["LineupURL"] == "http://test/lineup.json"
+    assert data["FirmwareVersion"] == "0.4.0"
 
 
 @pytest.mark.asyncio
