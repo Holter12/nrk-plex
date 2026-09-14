@@ -21,14 +21,15 @@ class NrkClient:
         path: str,
         *,
         accept: str | None = None,
+        params: dict[str, str] | None = None,
     ) -> Any:
-        url = f"{settings.base_url.rstrip('/')}/{path.lstrip('/') }"
+        url = f"{settings.base_url.rstrip('/')}/{path.lstrip('/')}"
         headers = {"Accept": accept} if accept else {}
         if self._http is not None:
-            response = await self._http.get(url, headers=headers)
+            response = await self._http.get(url, headers=headers, params=params)
         else:
             async with httpx.AsyncClient(timeout=settings.timeout_seconds) as client:
-                response = await client.get(url, headers=headers)
+                response = await client.get(url, headers=headers, params=params)
         if response.is_error:
             raise NrkApiError(f"NRK API returned {response.status_code} for {path}")
         try:
@@ -42,6 +43,7 @@ class NrkClient:
         return await self._get_json(
             f"playback/metadata/{encoded_type}/{encoded_id}",
             accept=settings.playback_accept,
+            params={"eea-portability": "true"},
         )
 
     async def playback_manifest(self, program_id: str, manifest_type: str = "program") -> Any:
@@ -50,6 +52,7 @@ class NrkClient:
         return await self._get_json(
             f"playback/manifest/{encoded_type}/{encoded_id}",
             accept=settings.playback_accept,
+            params={"eea-portability": "true"},
         )
 
     async def epg(self, channel_ids: list[str]) -> Any:
