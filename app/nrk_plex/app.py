@@ -9,7 +9,7 @@ from fastapi.responses import PlainTextResponse, RedirectResponse, StreamingResp
 from nrk_plex.nrk.client import NrkApiError, NrkClient
 from nrk_plex.plex import DEFAULT_CHANNELS, build_m3u, build_xmltv
 
-app = FastAPI(title="NRK Plex", version="0.4.0")
+app = FastAPI(title="NRK Plex", version="0.4.1")
 client = NrkClient()
 
 
@@ -39,28 +39,40 @@ def _parse_channels(channels: str) -> list[str]:
 
 
 async def _ffmpeg_mpegts(asset_url: str) -> AsyncIterator[bytes]:
-    """Remux NRK's HLS/fMP4 stream to MPEG-TS for the HDHomeRun/Plex interface."""
+    """Transcode NRK live HLS to broadly compatible H.264/AAC MPEG-TS for Plex."""
     process = await asyncio.create_subprocess_exec(
         "ffmpeg",
         "-hide_banner",
         "-loglevel",
-        "error",
+        "warning",
         "-nostdin",
         "-user_agent",
-        "Mozilla/5.0 (compatible; NRK-Plex/0.4)",
+        "Mozilla/5.0 (compatible; NRK-Plex/0.4.1)",
         "-i",
         asset_url,
         "-map",
         "0:v:0",
         "-map",
         "0:a:0?",
-        "-c",
-        "copy",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-tune",
+        "zerolatency",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-ar",
+        "48000",
         "-f",
         "mpegts",
         "pipe:1",
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
+        stderr=None,
     )
 
     try:
@@ -107,7 +119,7 @@ async def play(program_id: str) -> RedirectResponse:
 
 @app.get("/api/nrk/live/{channel_id}")
 async def live(channel_id: str) -> StreamingResponse:
-    """Serve live NRK as MPEG-TS, which is the format Plex expects from an HDHR tuner."""
+    """Serve live NRK as H.264/AAC MPEG-TS, which is broadly compatible with Plex."""
     try:
         manifest = await client.playback_manifest(channel_id, manifest_type="channel")
     except NrkApiError as exc:
@@ -186,7 +198,7 @@ async def discover(request: Request) -> dict[str, object]:
         "FriendlyName": "NRK Plex",
         "ModelNumber": "NRK-3TUNER",
         "FirmwareName": "nrk-plex",
-        "FirmwareVersion": "0.4.0",
+        "FirmwareVersion": "0.4.1",
         "DeviceID": "4E524B50",
         "DeviceAuth": "nrk-plex",
         "TunerCount": len(DEFAULT_CHANNELS),
