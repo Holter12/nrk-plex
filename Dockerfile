@@ -8,6 +8,10 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY app ./app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir .
 
 RUN mkdir -p /config /cache
