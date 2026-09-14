@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import PlainTextResponse, RedirectResponse
 
 from nrk_plex.nrk.client import NrkApiError, NrkClient
+from nrk_plex.plex import DEFAULT_CHANNELS, build_m3u, build_xmltv, find_current_program
 
-app = FastAPI(title="NRK Plex", version="0.2.0")
+app = FastAPI(title="NRK Plex", version="0.3.0")
 client = NrkClient()
 
 
@@ -23,6 +25,10 @@ def _first_hls_asset(manifest: Any) -> str | None:
         if asset.get("format") == "HLS" and isinstance(asset.get("url"), str):
             return asset["url"]
     return None
+
+
+def _parse_channels(channels: str) -> list[str]:
+    return [item.strip() for item in channels.split(",") if item.strip()]
 
 
 @app.get("/health")
@@ -54,12 +60,72 @@ async def play(program_id: str) -> RedirectResponse:
     return RedirectResponse(asset_url, status_code=307)
 
 
+@app.get("/api/nrk/live/{channel_id}")
+async def live(channel_id: str) -> RedirectResponse:
+    try:
+        epg = await client.epg([channel_id])
+    except NrkApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    program_id = find_current_program(epg, channel_id)
+    if not program_id:
+        raise HTTPException(status_code=404, detail=f"No current NRK program found for {channel_id}")
+
+    try:
+        manifest = await client.playback_manifest(program_id)
+    except NrkApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    asset_url = _first_hls_asset(manifest)
+    if not asset_url:
+        raise HTTPException(status_code=404, detail="NRK did not return an HLS playback asset")
+
+    return RedirectResponse(asset_url, status_code=307)
+
+
 @app.get("/api/nrk/epg")
-async def epg(channels: str = "nrk1,nrk2,nrk3") -> object:
-    channel_ids = [item.strip() for item in channels.split(",") if item.strip()]
+async def epg(channels: str = ",".join(DEFAULT_CHANNELS)) -> object:
+    channel_ids = _parse_channels(channels)
     if not channel_ids:
         raise HTTPException(status_code=400, detail="At least one channel is required")
     try:
         return await client.epg(channel_ids)
     except NrkApiError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/api/plex/playlist.m3u", response_class=PlainTextResponse)
+async def plex_playlist(request: Request, channels: str = ",".join(DEFAULT_CHANNELS)) -> PlainTextResponse:
+    channel_ids = _parse_channels(channels)
+    if not channel_ids:
+        raise HTTPException(status_code=400, detail="At least one channel is required")
+    try:
+        epg = await client.epg(channel_ids)
+    except NrkApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    base_url = str(request.base_url).rstrip("/")
+    return PlainTextResponse(build_m3u(epg, base_url, channel_ids), media_type="application/x-mpegURL")
+
+
+@app.get("/api/plex/epg.xml", response_class=PlainTextResponse)
+async def plex_epg(channels: str = ",".join(DEFAULT_CHANNELS)) -> PlainTextResponse:
+    channel_ids = _parse_channels(channels)
+    if not channel_ids:
+        raise HTTPException(status_code=400, detail="At least one channel is required")
+    try:
+        epg = await client.epg(channel_ids)
+    except NrkApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return PlainTextResponse(build_xmltv(epg), media_type="application/xml")
+
+
+@app.get("/playlist.m3u", response_class=PlainTextResponse, include_in_schema=False)
+async def playlist_alias(request: Request, channels: str = ",".join(DEFAULT_CHANNELS)) -> PlainTextResponse:
+    return await plex_playlist(request, channels)
+
+
+@app.get("/epg.xml", response_class=PlainTextResponse, include_in_schema=False)
+async def epg_alias(channels: str = ",".join(DEFAULT_CHANNELS)) -> PlainTextResponse:
+    return await plex_epg(channels)
