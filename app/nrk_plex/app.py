@@ -8,7 +8,7 @@ from fastapi.responses import PlainTextResponse, RedirectResponse
 from nrk_plex.nrk.client import NrkApiError, NrkClient
 from nrk_plex.plex import DEFAULT_CHANNELS, build_m3u, build_xmltv, find_current_program
 
-app = FastAPI(title="NRK Plex", version="0.3.1")
+app = FastAPI(title="NRK Plex", version="0.3.2")
 client = NrkClient()
 
 
@@ -61,23 +61,17 @@ async def play(program_id: str) -> RedirectResponse:
 
 @app.get("/api/nrk/live/{channel_id}")
 async def live(channel_id: str) -> RedirectResponse:
+    # NRK's current live-TV API uses manifest type 'channel'.
+    # Do not resolve the current EPG program here: a live channel is a
+    # continuous stream and must use the channel manifest directly.
     try:
-        epg = await client.epg([channel_id])
-    except NrkApiError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    program_id = find_current_program(epg, channel_id)
-    if not program_id:
-        raise HTTPException(status_code=404, detail=f"No current NRK program found for {channel_id}")
-
-    try:
-        manifest = await client.playback_manifest(program_id)
+        manifest = await client.playback_manifest(channel_id, manifest_type="channel")
     except NrkApiError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     asset_url = _first_hls_asset(manifest)
     if not asset_url:
-        raise HTTPException(status_code=404, detail="NRK did not return an HLS playback asset")
+        raise HTTPException(status_code=404, detail="NRK did not return an HLS live playback asset")
 
     return RedirectResponse(asset_url, status_code=307)
 
@@ -104,7 +98,10 @@ async def plex_playlist(request: Request, channels: str = ",".join(DEFAULT_CHANN
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     base_url = str(request.base_url).rstrip("/")
-    return PlainTextResponse(build_m3u(epg, base_url, channel_ids), media_type="application/x-mpegURL")
+    # Use text/plain rather than application/x-mpegURL. The latter makes
+    # browsers interpret this IPTV playlist as a playable HLS resource,
+    # which results in an empty video player instead of showing the M3U text.
+    return PlainTextResponse(build_m3u(epg, base_url, channel_ids), media_type="text/plain")
 
 
 @app.get("/api/plex/epg.xml", response_class=PlainTextResponse)
