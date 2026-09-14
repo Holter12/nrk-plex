@@ -6,10 +6,17 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse
 
 from nrk_plex.nrk.client import NrkApiError, NrkClient
-from nrk_plex.plex import DEFAULT_CHANNELS, build_m3u, build_xmltv, find_current_program
+from nrk_plex.plex import DEFAULT_CHANNELS, build_m3u, build_xmltv
 
-app = FastAPI(title="NRK Plex", version="0.3.2")
+app = FastAPI(title="NRK Plex", version="0.3.3")
 client = NrkClient()
+
+
+CHANNEL_NAMES = {
+    "nrk1": "NRK1",
+    "nrk2": "NRK2",
+    "nrk3": "NRK3",
+}
 
 
 def _first_hls_asset(manifest: Any) -> str | None:
@@ -62,8 +69,7 @@ async def play(program_id: str) -> RedirectResponse:
 @app.get("/api/nrk/live/{channel_id}")
 async def live(channel_id: str) -> RedirectResponse:
     # NRK's current live-TV API uses manifest type 'channel'.
-    # Do not resolve the current EPG program here: a live channel is a
-    # continuous stream and must use the channel manifest directly.
+    # A live channel is a continuous stream and must use the channel manifest directly.
     try:
         manifest = await client.playback_manifest(channel_id, manifest_type="channel")
     except NrkApiError as exc:
@@ -98,9 +104,8 @@ async def plex_playlist(request: Request, channels: str = ",".join(DEFAULT_CHANN
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     base_url = str(request.base_url).rstrip("/")
-    # Use text/plain rather than application/x-mpegURL. The latter makes
-    # browsers interpret this IPTV playlist as a playable HLS resource,
-    # which results in an empty video player instead of showing the M3U text.
+    # Keep the M3U endpoint as text so browsers display the playlist rather than
+    # treating it as an HLS resource.
     return PlainTextResponse(build_m3u(epg, base_url, channel_ids), media_type="text/plain")
 
 
@@ -115,6 +120,48 @@ async def plex_epg(channels: str = ",".join(DEFAULT_CHANNELS)) -> PlainTextRespo
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return PlainTextResponse(build_xmltv(epg), media_type="application/xml")
+
+
+# HDHomeRun-compatible endpoints let Plex treat this service as a network tuner,
+# avoiding a separate xTeVe/Threadfin container for this small NRK lineup.
+@app.get("/discover.json")
+async def discover(request: Request) -> dict[str, object]:
+    base_url = str(request.base_url).rstrip("/")
+    return {
+        "FriendlyName": "NRK Plex",
+        "ModelNumber": "NRK-3TUNER",
+        "FirmwareName": "nrk-plex",
+        "FirmwareVersion": "0.3.3",
+        "DeviceID": "4E524B50",
+        "DeviceAuth": "nrk-plex",
+        "TunerCount": len(DEFAULT_CHANNELS),
+        "BaseURL": base_url,
+        "LineupURL": f"{base_url}/lineup.json",
+    }
+
+
+@app.get("/lineup.json")
+async def lineup(request: Request) -> list[dict[str, object]]:
+    base_url = str(request.base_url).rstrip("/")
+    return [
+        {
+            "GuideNumber": str(index),
+            "GuideName": CHANNEL_NAMES.get(channel_id, channel_id.upper()),
+            "URL": f"{base_url}/api/nrk/live/{channel_id}",
+            "HD": 1,
+        }
+        for index, channel_id in enumerate(DEFAULT_CHANNELS, start=1)
+    ]
+
+
+@app.get("/lineup_status.json")
+async def lineup_status() -> dict[str, object]:
+    return {
+        "ScanInProgress": 0,
+        "ScanPossible": 0,
+        "Source": "IPTV",
+        "SourceList": ["IPTV"],
+    }
 
 
 @app.get("/playlist.m3u", response_class=PlainTextResponse, include_in_schema=False)
