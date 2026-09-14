@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Container version="2">
+  <Name>NRK Plex</Name>
+  <Repository>ghcr.io/holter12/nrk-plex:latest</Repository>
+  <Registry>https://ghcr.io/</Registry>
+  <Project>https://github.com/Holter12/nrk-plex</Project>
+  <Overview>Self-hosted NRK TV bridge for Plex. Designed for Unraid and Docker.</Overview>
+  <Category>MediaServer:Video MediaServer:Music</Category>
+  <WebUI>http://[IP]:[PORT:8080]/docs</WebUI>
+  <Support>https://github.com/Holter12/nrk-plex/issues</Support>
+  <Requires>Docker</Requires>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Config Name="Web UI Port" Target="8080" Default="8080" Mode="tcp" Description="Port used by the NRK Plex web/API service." Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/nrk-plex/config" Mode="rw" Description="Persistent application configuration." Type="Path" Display="advanced-hide" Required="true" Mask="false">/mnt/user/appdata/nrk-plex/config</Config>
+  <Config Name="Cache" Target="/cache" Default="/mnt/user/appdata/nrk-plex/cache" Mode="rw" Description="Application cache." Type="Path" Display="advanced-hide" Required="true" Mask="false">/mnt/user/appdata/nrk-plex/cache</Config>
+  <Config Name="NRK PSAPI Base URL" Target="NRK_PSAPI_BASE_URL" Default="https://psapi.nrk.no" Mode="" Description="NRK PSAPI base URL." Type="Variable" Display="advanced-hide" Required="true" Mask="false">https://psapi.nrk.no</Config>
+  <Config Name="HTTP Timeout" Target="NRK_HTTP_TIMEOUT" Default="15" Mode="" Description="HTTP request timeout in seconds." Type="Variable" Display="advanced-hide" Required="true" Mask="false">15</Config>
+</Container>
