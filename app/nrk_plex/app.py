@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from typing import Any
+import asyncio
+from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import PlainTextResponse, RedirectResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse, StreamingResponse
 
 from nrk_plex.nrk.client import NrkApiError, NrkClient
 from nrk_plex.plex import DEFAULT_CHANNELS, build_m3u, build_xmltv
 
-app = FastAPI(title="NRK Plex", version="0.3.3")
+app = FastAPI(title="NRK Plex", version="0.4.0")
 client = NrkClient()
 
 
@@ -35,6 +36,44 @@ def _first_hls_asset(manifest: Any) -> str | None:
 
 def _parse_channels(channels: str) -> list[str]:
     return [item.strip() for item in channels.split(",") if item.strip()]
+
+
+async def _ffmpeg_mpegts(asset_url: str) -> AsyncIterator[bytes]:
+    """Remux NRK's HLS/fMP4 stream to MPEG-TS for the HDHomeRun/Plex interface."""
+    process = await asyncio.create_subprocess_exec(
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-user_agent",
+        "Mozilla/5.0 (compatible; NRK-Plex/0.4)",
+        "-i",
+        asset_url,
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0?",
+        "-c",
+        "copy",
+        "-f",
+        "mpegts",
+        "pipe:1",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+
+    try:
+        assert process.stdout is not None
+        while True:
+            chunk = await process.stdout.read(64 * 1024)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        if process.returncode is None:
+            process.terminate()
+        await process.wait()
 
 
 @app.get("/health")
@@ -67,9 +106,27 @@ async def play(program_id: str) -> RedirectResponse:
 
 
 @app.get("/api/nrk/live/{channel_id}")
-async def live(channel_id: str) -> RedirectResponse:
-    # NRK's current live-TV API uses manifest type 'channel'.
-    # A live channel is a continuous stream and must use the channel manifest directly.
+async def live(channel_id: str) -> StreamingResponse:
+    """Serve live NRK as MPEG-TS, which is the format Plex expects from an HDHR tuner."""
+    try:
+        manifest = await client.playback_manifest(channel_id, manifest_type="channel")
+    except NrkApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    asset_url = _first_hls_asset(manifest)
+    if not asset_url:
+        raise HTTPException(status_code=404, detail="NRK did not return an HLS live playback asset")
+
+    return StreamingResponse(
+        _ffmpeg_mpegts(asset_url),
+        media_type="video/mp2t",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
+@app.get("/api/nrk/live-hls/{channel_id}")
+async def live_hls(channel_id: str) -> RedirectResponse:
+    """Raw NRK HLS endpoint retained for debugging and direct-player testing."""
     try:
         manifest = await client.playback_manifest(channel_id, manifest_type="channel")
     except NrkApiError as exc:
@@ -104,8 +161,6 @@ async def plex_playlist(request: Request, channels: str = ",".join(DEFAULT_CHANN
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     base_url = str(request.base_url).rstrip("/")
-    # Keep the M3U endpoint as text so browsers display the playlist rather than
-    # treating it as an HLS resource.
     return PlainTextResponse(build_m3u(epg, base_url, channel_ids), media_type="text/plain")
 
 
@@ -131,7 +186,7 @@ async def discover(request: Request) -> dict[str, object]:
         "FriendlyName": "NRK Plex",
         "ModelNumber": "NRK-3TUNER",
         "FirmwareName": "nrk-plex",
-        "FirmwareVersion": "0.3.3",
+        "FirmwareVersion": "0.4.0",
         "DeviceID": "4E524B50",
         "DeviceAuth": "nrk-plex",
         "TunerCount": len(DEFAULT_CHANNELS),
