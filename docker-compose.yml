@@ -1,0 +1,13 @@
+services:
+  nrk-plex:
+    build: .
+    container_name: nrk-plex
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      NRK_PSAPI_BASE_URL: "https://psapi.nrk.no"
+      NRK_HTTP_TIMEOUT: "15"
+    volumes:
+      - /mnt/user/appdata/nrk-plex/config:/config
+      - /mnt/user/appdata/nrk-plex/cache:/cache
