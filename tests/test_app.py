@@ -1,7 +1,7 @@
 from httpx import ASGITransport, AsyncClient
 import pytest
 
-from nrk_plex.app import app
+from nrk_plex.app import app, client as app_module_client
 
 
 @pytest.mark.asyncio
