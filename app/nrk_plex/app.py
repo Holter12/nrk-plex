@@ -34,6 +34,28 @@ def _first_hls_asset(manifest: Any) -> str | None:
     return None
 
 
+def _subtitle_tracks(manifest: Any) -> list[dict[str, object]]:
+    """Return the NRK subtitle tracks without exposing the whole playback payload."""
+    playable = manifest.get("playable") if isinstance(manifest, dict) else None
+    subtitles = playable.get("subtitles") if isinstance(playable, dict) else None
+    if not isinstance(subtitles, list):
+        return []
+
+    tracks: list[dict[str, object]] = []
+    for subtitle in subtitles:
+        if not isinstance(subtitle, dict):
+            continue
+
+        track: dict[str, object] = {
+            "language": subtitle.get("language"),
+            "name": subtitle.get("name"),
+            "defaultOn": subtitle.get("defaultOn"),
+            "webVtt": subtitle.get("webVtt"),
+        }
+        tracks.append(track)
+    return tracks
+
+
 def _parse_channels(channels: str) -> list[str]:
     return [item.strip() for item in channels.split(",") if item.strip()]
 
@@ -134,6 +156,22 @@ async def live(channel_id: str) -> StreamingResponse:
         media_type="video/mp2t",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
+
+
+@app.get("/api/nrk/live-subtitles/{channel_id}")
+async def live_subtitles(channel_id: str) -> dict[str, object]:
+    """Inspect subtitle tracks exposed by NRK's live channel manifest."""
+    try:
+        manifest = await client.playback_manifest(channel_id, manifest_type="channel")
+    except NrkApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return {
+        "channel_id": channel_id,
+        "channel_name": CHANNEL_NAMES.get(channel_id, channel_id.upper()),
+        "hls_available": _first_hls_asset(manifest) is not None,
+        "subtitles": _subtitle_tracks(manifest),
+    }
 
 
 @app.get("/api/nrk/live-hls/{channel_id}")
